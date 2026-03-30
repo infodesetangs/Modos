@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Recrutement Modo Stream</title>
+    <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
+    
+    <style>
+        body { background-color: #0e0e10; color: #efeff1; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .card { background: #18181b; border-radius: 12px; padding: 25px; width: 100%; max-width: 450px; margin-bottom: 20px; border: 1px solid #303032; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        h1, h2 { color: #a970ff; text-align: center; margin-top: 0; }
+        input, textarea { width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 6px; border: 2px solid #3f3f46; background: #0e0e10; color: white; box-sizing: border-box; outline: none; }
+        button { width: 100%; padding: 14px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.2s; }
+        .btn-postuler { background: #9147ff; color: white; }
+        .btn-postuler:hover { background: #772ce8; }
+        .btn-admin { background: #3f3f46; color: white; }
+        .candidat-item { background: #26262c; padding: 15px; margin-top: 15px; border-radius: 8px; border-left: 5px solid #9147ff; }
+        .actions { display: flex; gap: 10px; margin-top: 10px; }
+        .btn-accept { background: #00c46d; color: white; flex: 1; font-size: 13px; }
+        .btn-refuse { background: #eb0400; color: white; flex: 1; font-size: 13px; }
+        .status-msg { font-weight: bold; text-align: center; padding: 8px; margin-top: 10px; border-radius: 4px; text-transform: uppercase; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h1>Postuler</h1>
+        <input type="text" id="pseudo" placeholder="Ton Pseudo Twitch">
+        <textarea id="reason" rows="4" placeholder="Tes motivations..."></textarea>
+        <button class="btn-postuler" onclick="envoyer()">Envoyer ma candidature</button>
+    </div>
+
+    <div class="card">
+        <h2>Canditatures</h2>
+        <div id="login-form">
+            <input type="password" id="admin-code" placeholder="Code secret">
+            <button class="btn-admin" onclick="connecterAdmin()">Voir les candidatures</button>
+        </div>
+
+        <div id="dashboard" style="display:none;">
+            <div id="liste-candidats"></div>
+            <center><button onclick="deconnexion()" style="background:none; color:gray; font-size:11px; margin-top:20px; cursor:pointer; border:none; text-decoration:underline;">Déconnexion / Reset</button></center>
+        </div>
+    </div>
+
+    <script>
+        const ABLY_KEY = 'b-Eojg.uxqCCA:-rA7CEJ9ED_aFZgN9Uzt247zfSbCWVBGjA7boA3VAFw';
+        const MON_CODE_PRIVÉ = "a24f54rg4v12fds5";
+        
+        const ably = new Ably.Realtime(ABLY_KEY);
+        const channel = ably.channels.get('recrutement', { params: { rewind: '100' } });
+
+        // On récupère les décisions sauvegardées ou on crée un objet vide
+        let decisions = JSON.parse(localStorage.getItem('decisions_modo')) || {};
+
+        window.onload = () => {
+            if (localStorage.getItem('is_admin') === 'true') { afficherDashboard(); }
+        };
+
+        function envoyer() {
+            const pseudo = document.getElementById('pseudo').value;
+            const reason = document.getElementById('reason').value;
+            if (pseudo.trim() && reason.trim()) {
+                channel.publish('candidature', { pseudo, reason });
+                alert("Envoyé !");
+                document.getElementById('pseudo').value = ""; document.getElementById('reason').value = "";
+            }
+        }
+
+        function connecterAdmin() {
+            if (document.getElementById('admin-code').value === MON_CODE_PRIVÉ) {
+                localStorage.setItem('is_admin', 'true');
+                afficherDashboard();
+            } else { alert("Code faux !"); }
+        }
+
+        function afficherDashboard() {
+            document.getElementById('login-form').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'block';
+            
+            channel.subscribe('candidature', (msg) => {
+                ajouterCandidat(msg.data);
+            });
+        }
+
+        function ajouterCandidat(data) {
+            const liste = document.getElementById('liste-candidats');
+            const div = document.createElement('div');
+            div.className = "candidat-item";
+            
+            // On vérifie si ce pseudo a déjà été traité
+            const statutPrecedent = decisions[data.pseudo]; 
+            
+            let contenuActions = `
+                <div class="actions">
+                    <button class="btn-accept" onclick="reponse(this, '${data.pseudo}', 'ACCEPTÉ ✅', '#00c46d')">Accepter</button>
+                    <button class="btn-refuse" onclick="reponse(this, '${data.pseudo}', 'REFUSÉ ❌', '#eb0400')">Refuser</button>
+                </div>`;
+
+            // Si déjà décidé, on affiche direct le résultat
+            if (statutPrecedent) {
+                contenuActions = `<div class="status-msg" style="background:${statutPrecedent.couleur}">${statutPrecedent.texte}</div>`;
+            }
+
+            div.innerHTML = `
+                <div style="color:#a970ff; font-weight:bold;">@${data.pseudo}</div>
+                <div style="font-size:14px; margin-top:5px;">${data.reason}</div>
+                <div id="status-container-${data.pseudo}">${contenuActions}</div>
+            `;
+            liste.prepend(div);
+        }
+
+        function reponse(btn, pseudo, texte, couleur) {
+            // 1. Sauvegarder la décision localement
+            decisions[pseudo] = { texte: texte, couleur: couleur };
+            localStorage.setItem('decisions_modo', JSON.stringify(decisions));
+
+            // 2. Mettre à jour l'affichage
+            const container = document.getElementById(`status-container-${pseudo}`);
+            container.innerHTML = `<div class="status-msg" style="background:${couleur}">${texte}</div>`;
+        }
+
+        function deconnexion() { 
+            if(confirm("Veux-tu aussi effacer l'historique des acceptés/refusés ?")) {
+                localStorage.removeItem('decisions_modo');
+            }
+            localStorage.removeItem('is_admin'); 
+            location.reload(); 
+        }
+    </script>
+</body>
+</html>
