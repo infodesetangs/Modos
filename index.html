@@ -24,14 +24,14 @@
 <body>
 
     <div class="card">
-        <h1>Postuler</h1>
+        <h1>Postuler 🛠️</h1>
         <input type="text" id="pseudo" placeholder="Ton Pseudo Twitch">
         <textarea id="reason" rows="4" placeholder="Tes motivations..."></textarea>
         <button class="btn-postuler" onclick="envoyer()">Envoyer ma candidature</button>
     </div>
 
     <div class="card">
-        <h2>Canditatures</h2>
+        <h2>Espace Streamer 👑</h2>
         <div id="login-form">
             <input type="password" id="admin-code" placeholder="Code secret">
             <button class="btn-admin" onclick="connecterAdmin()">Voir les candidatures</button>
@@ -39,7 +39,7 @@
 
         <div id="dashboard" style="display:none;">
             <div id="liste-candidats"></div>
-            <center><button onclick="deconnexion()" style="background:none; color:gray; font-size:11px; margin-top:20px; cursor:pointer; border:none; text-decoration:underline;">Déconnexion / Reset</button></center>
+            <center><button onclick="deconnexion()" style="background:none; color:gray; font-size:11px; margin-top:20px; cursor:pointer; border:none; text-decoration:underline;">Déconnexion / Reset Total</button></center>
         </div>
     </div>
 
@@ -50,11 +50,16 @@
         const ably = new Ably.Realtime(ABLY_KEY);
         const channel = ably.channels.get('recrutement', { params: { rewind: '100' } });
 
-        // On récupère les décisions sauvegardées ou on crée un objet vide
+        // MÉMOIRE LOCALE (LocalStorage)
         let decisions = JSON.parse(localStorage.getItem('decisions_modo')) || {};
+        let historiqueLocal = JSON.parse(localStorage.getItem('candidatures_locales')) || [];
 
         window.onload = () => {
-            if (localStorage.getItem('is_admin') === 'true') { afficherDashboard(); }
+            if (localStorage.getItem('is_admin') === 'true') { 
+                afficherDashboard(); 
+                // On recharge tout ce qu'on a déjà en mémoire
+                historiqueLocal.forEach(cand => ajouterCandidatVisuel(cand));
+            }
         };
 
         function envoyer() {
@@ -63,7 +68,8 @@
             if (pseudo.trim() && reason.trim()) {
                 channel.publish('candidature', { pseudo, reason });
                 alert("Envoyé !");
-                document.getElementById('pseudo').value = ""; document.getElementById('reason').value = "";
+                document.getElementById('pseudo').value = ""; 
+                document.getElementById('reason').value = "";
             }
         }
 
@@ -71,6 +77,7 @@
             if (document.getElementById('admin-code').value === MON_CODE_PRIVÉ) {
                 localStorage.setItem('is_admin', 'true');
                 afficherDashboard();
+                location.reload(); // On reload pour être sûr de tout afficher
             } else { alert("Code faux !"); }
         }
 
@@ -78,53 +85,61 @@
             document.getElementById('login-form').style.display = 'none';
             document.getElementById('dashboard').style.display = 'block';
             
+            // On écoute les nouveaux messages
             channel.subscribe('candidature', (msg) => {
-                ajouterCandidat(msg.data);
+                // On vérifie si on ne l'a pas déjà enregistré (pour éviter les doublons)
+                const dejaPresent = historiqueLocal.some(c => c.pseudo === msg.data.pseudo && c.reason === msg.data.reason);
+                
+                if (!dejaPresent) {
+                    historiqueLocal.push(msg.data);
+                    localStorage.setItem('candidatures_locales', JSON.stringify(historiqueLocal));
+                    ajouterCandidatVisuel(msg.data);
+                }
             });
         }
 
-        function ajouterCandidat(data) {
+        function ajouterCandidatVisuel(data) {
             const liste = document.getElementById('liste-candidats');
+            
+            // Empêche d'afficher deux fois le même bloc sur la page
+            if (document.getElementById(`card-${data.pseudo}`)) return;
+
             const div = document.createElement('div');
             div.className = "candidat-item";
+            div.id = `card-${data.pseudo}`;
             
-            // On vérifie si ce pseudo a déjà été traité
-            const statutPrecedent = decisions[data.pseudo]; 
+            const statut = decisions[data.pseudo]; 
             
-            let contenuActions = `
+            let htmlActions = `
                 <div class="actions">
                     <button class="btn-accept" onclick="reponse(this, '${data.pseudo}', 'ACCEPTÉ ✅', '#00c46d')">Accepter</button>
                     <button class="btn-refuse" onclick="reponse(this, '${data.pseudo}', 'REFUSÉ ❌', '#eb0400')">Refuser</button>
                 </div>`;
 
-            // Si déjà décidé, on affiche direct le résultat
-            if (statutPrecedent) {
-                contenuActions = `<div class="status-msg" style="background:${statutPrecedent.couleur}">${statutPrecedent.texte}</div>`;
+            if (statut) {
+                htmlActions = `<div class="status-msg" style="background:${statut.couleur}">${statut.texte}</div>`;
             }
 
             div.innerHTML = `
                 <div style="color:#a970ff; font-weight:bold;">@${data.pseudo}</div>
                 <div style="font-size:14px; margin-top:5px;">${data.reason}</div>
-                <div id="status-container-${data.pseudo}">${contenuActions}</div>
+                <div id="status-container-${data.pseudo}">${htmlActions}</div>
             `;
             liste.prepend(div);
         }
 
         function reponse(btn, pseudo, texte, couleur) {
-            // 1. Sauvegarder la décision localement
             decisions[pseudo] = { texte: texte, couleur: couleur };
             localStorage.setItem('decisions_modo', JSON.stringify(decisions));
-
-            // 2. Mettre à jour l'affichage
-            const container = document.getElementById(`status-container-${pseudo}`);
-            container.innerHTML = `<div class="status-msg" style="background:${couleur}">${texte}</div>`;
+            document.getElementById(`status-container-${pseudo}`).innerHTML = `<div class="status-msg" style="background:${couleur}">${texte}</div>`;
         }
 
         function deconnexion() { 
-            if(confirm("Veux-tu aussi effacer l'historique des acceptés/refusés ?")) {
-                localStorage.removeItem('decisions_modo');
+            if(confirm("Voulez-vous tout effacer (Historique + Décisions) ?")) {
+                localStorage.clear();
+            } else {
+                localStorage.removeItem('is_admin');
             }
-            localStorage.removeItem('is_admin'); 
             location.reload(); 
         }
     </script>
